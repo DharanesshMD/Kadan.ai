@@ -5,7 +5,7 @@ import { getMasterPrompt } from '@/lib/prompts';
 const NVIDIA_API_URL = "https://integrate.api.nvidia.com/v1/chat/completions";
 const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY!;
 
-export const calculateWithGemini = async (input: UserInput): Promise<CalculationResult> => {
+const calculateWithGemini = async (input: UserInput): Promise<CalculationResult> => {
   const currentYear = new Date().getFullYear();
   const prompt = getMasterPrompt(input, currentYear);
   
