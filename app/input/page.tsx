@@ -1,12 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useApp } from '@/context/AppContext';
 import { UserInput } from '@/types';
 
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
+import { COLLEGES_BY_STATE, getCollegesByState } from '@/data/colleges';
 
 const US_STATES = [
   'Alabama', 'Alaska', 'Arizona', 'Arkansas', 'California', 'Colorado', 'Connecticut', 'Delaware',
@@ -34,13 +35,36 @@ export default function InputPage() {
     college: '',
     state: '',
     major: '',
+    isPrivateCollege: false,
     age: 18,
-    annualFamilyIncome: 50000,
     currentSavings: 0,
     expectedLoanAmount: 0,
     workDuringCollege: false,
     graduateSchool: false
   });
+  
+  const [collegeSearchInput, setCollegeSearchInput] = useState('');
+  
+  // Get colleges for selected state, filtered by privacy if needed
+  const filteredColleges = useMemo(() => {
+    if (!formData.state) return [];
+    
+    const collegesInState = getCollegesByState(formData.state);
+    
+    // Filter by private/public status if checkbox is checked
+    const privacyFiltered = formData.isPrivateCollege 
+      ? collegesInState.filter(college => college.isPrivate)
+      : collegesInState;
+    
+    if (!collegeSearchInput.trim()) {
+      return privacyFiltered;
+    }
+    
+    const searchTerm = collegeSearchInput.toLowerCase();
+    return privacyFiltered.filter(college =>
+      college.name.toLowerCase().includes(searchTerm)
+    );
+  }, [formData.state, formData.isPrivateCollege, collegeSearchInput]);
 
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -59,6 +83,14 @@ export default function InputPage() {
       [name]: checked
     }));
   };
+  
+  const handleCollegeSelect = (collegeName: string) => {
+    setFormData(prev => ({
+      ...prev,
+      college: collegeName
+    }));
+    setCollegeSearchInput('');
+  };
 
   const validateForm = (): boolean => {
     const newErrors: Record<string, string> = {};
@@ -74,9 +106,6 @@ export default function InputPage() {
     }
     if (formData.age < 16 || formData.age > 30) {
       newErrors.age = 'Age must be between 16 and 30';
-    }
-    if (formData.annualFamilyIncome < 0) {
-      newErrors.annualFamilyIncome = 'Family income cannot be negative';
     }
     if (formData.currentSavings < 0) {
       newErrors.currentSavings = 'Savings cannot be negative';
@@ -136,28 +165,10 @@ export default function InputPage() {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-6">
-            {/* College Name */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                College/University Name *
-              </label>
-              <input
-                type="text"
-                name="college"
-                value={formData.college}
-                onChange={handleInputChange}
-                className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-black ${
-                  errors.college ? 'border-red-500' : 'border-gray-300'
-                }`}
-                placeholder="e.g., Harvard University"
-              />
-              {errors.college && <p className="text-red-500 text-sm mt-1">{errors.college}</p>}
-            </div>
-
             {/* State */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                State *
+                Your State *
               </label>
               <Select
                 name="state"
@@ -167,7 +178,7 @@ export default function InputPage() {
                 <SelectTrigger className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-black bg-white ${
                   errors.state ? 'border-red-500' : 'border-gray-300'
                 }`}>
-                  <SelectValue placeholder="Select a state" />
+                  <SelectValue placeholder="Select your state" />
                 </SelectTrigger>
                 <SelectContent>
                   {US_STATES.map((state) => (
@@ -178,6 +189,61 @@ export default function InputPage() {
                 </SelectContent>
               </Select>
               {errors.state && <p className="text-red-500 text-sm mt-1">{errors.state}</p>}
+            </div>
+
+            {/* Private College Filter */}
+            {formData.state && (
+              <div className="flex items-center p-3 bg-blue-50 rounded-lg border border-blue-200">
+                <input
+                  type="checkbox"
+                  id="isPrivateCollege"
+                  name="isPrivateCollege"
+                  checked={formData.isPrivateCollege}
+                  onChange={handleCheckboxChange}
+                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                />
+                <label htmlFor="isPrivateCollege" className="ml-2 block text-sm text-gray-700">
+                  Show only private colleges/universities
+                </label>
+              </div>
+            )}
+
+            {/* College Name */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                College/University Name *
+              </label>
+              <div className="relative">
+                <Select
+                  name="college"
+                  value={formData.college}
+                  onValueChange={handleCollegeSelect}
+                  disabled={!formData.state}
+                >
+                  <SelectTrigger className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-black bg-white ${
+                    errors.college ? 'border-red-500' : 'border-gray-300'
+                  } ${!formData.state ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                    <SelectValue placeholder="Select a college" />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-64">
+                    {filteredColleges.length > 0 ? (
+                      filteredColleges.map((college) => (
+                        <SelectItem key={college.name} value={college.name}>
+                          <span className="flex items-center gap-2">
+                            {college.name}
+                            {college.isPrivate && <span className="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded">Private</span>}
+                          </span>
+                        </SelectItem>
+                      ))
+                    ) : (
+                      <div className="px-4 py-2 text-gray-500 text-sm">
+                        No colleges found
+                      </div>
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+              {errors.college && <p className="text-red-500 text-sm mt-1">{errors.college}</p>}
             </div>
 
             {/* Major */}
@@ -223,25 +289,6 @@ export default function InputPage() {
                 max="30"
               />
               {errors.age && <p className="text-red-500 text-sm mt-1">{errors.age}</p>}
-            </div>
-
-            {/* Family Income */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Annual Family Income ($)
-              </label>
-              <input
-                type="number"
-                name="annualFamilyIncome"
-                value={formData.annualFamilyIncome}
-                onChange={handleInputChange}
-                className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-black ${
-                  errors.annualFamilyIncome ? 'border-red-500' : 'border-gray-300'
-                }`}
-                min="0"
-                step="1000"
-              />
-              {errors.annualFamilyIncome && <p className="text-red-500 text-sm mt-1">{errors.annualFamilyIncome}</p>}
             </div>
 
             {/* Current Savings */}

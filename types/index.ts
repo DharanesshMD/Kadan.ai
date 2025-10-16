@@ -2,8 +2,8 @@ export interface UserInput {
   college: string;
   major: string;
   state: string;
+  isPrivateCollege: boolean;
   age: number;
-  annualFamilyIncome: number;
   currentSavings: number;
   expectedLoanAmount: number;
   workDuringCollege: boolean;

@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useApp } from '@/context/AppContext';
 import { useEffect } from 'react';
+import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 
 export default function ResultsPage() {
   const router = useRouter();
@@ -41,6 +42,77 @@ export default function ResultsPage() {
 
   const formatPercentage = (rate: number) => {
     return `${(rate * 100).toFixed(1)}%`;
+  };
+
+  // Generate financial outlook data for the graph
+  const financialOutlookData = () => {
+    const data = [];
+    const collegeCostPerYear = results.tuitionPerYear;
+    let cumulativeDebt = 0;
+    let cumulativeSalary = 0;
+
+    // College years (0-3)
+    for (let i = 0; i < 4; i++) {
+      cumulativeDebt += collegeCostPerYear;
+      data.push({
+        year: i,
+        label: `Year ${i + 1}`,
+        debt: cumulativeDebt,
+        salary: 0,
+        type: 'College'
+      });
+    }
+
+    // Post-college years (payoff period)
+    const monthlyPayment = results.monthlyLoanPayment;
+    let remainingDebt = results.totalLoanAmount;
+    for (let i = 4; i <= results.loanTermYears + 4; i++) {
+      cumulativeSalary += results.averageSalary;
+      remainingDebt = Math.max(0, remainingDebt - (monthlyPayment * 12));
+      data.push({
+        year: i,
+        label: `Year ${i + 1}`,
+        debt: remainingDebt,
+        salary: cumulativeSalary,
+        type: 'Payoff'
+      });
+    }
+
+    return data;
+  };
+
+  const debtVsSalaryData = () => {
+    const data = [];
+    const collegeCostPerYear = results.tuitionPerYear;
+    const annualSalary = results.averageSalary;
+    const monthlyPayment = results.monthlyLoanPayment;
+
+    let totalDebt = 0;
+    let totalSalary = 0;
+    let remainingDebt = results.totalLoanAmount;
+
+    // College years
+    for (let i = 0; i < 4; i++) {
+      totalDebt += collegeCostPerYear;
+      data.push({
+        year: i + 1,
+        'Total Debt': totalDebt,
+        'Cumulative Salary': totalSalary
+      });
+    }
+
+    // Payoff years
+    for (let i = 4; i <= results.loanTermYears + 4; i++) {
+      remainingDebt = Math.max(0, remainingDebt - (monthlyPayment * 12));
+      totalSalary += annualSalary;
+      data.push({
+        year: i + 1,
+        'Total Debt': remainingDebt,
+        'Cumulative Salary': totalSalary
+      });
+    }
+
+    return data;
   };
 
   return (
@@ -95,7 +167,9 @@ export default function ResultsPage() {
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-600">In-State Student:</span>
-                <span className={`font-semibold ${results.isInState ? 'text-green-600' : 'text-red-600'}`}>{results.isInState ? 'Yes' : 'No'}</span>
+                <span className={`font-semibold ${userInput.isPrivateCollege ? 'text-gray-500' : (results.isInState ? 'text-green-600' : 'text-red-600')}`}>
+                  {userInput.isPrivateCollege ? 'N/A' : (results.isInState ? 'Yes' : 'No')}
+                </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-600">Expected Graduation:</span>
@@ -168,38 +242,151 @@ export default function ResultsPage() {
             </div>
           </div>
 
-          {/* Tax Analysis */}
+          {/* Monthly Income vs Loan Payment Pie Chart */}
           <div className="bg-white rounded-xl shadow-lg p-6">
-            <h2 className="text-2xl font-semibold text-gray-800 mb-4">📊 Tax Impact</h2>
-            <div className="space-y-4">
-              <div className="flex justify-between">
-                <span className="text-gray-600">Federal Tax:</span>
-                <span className="font-bold text-red-600 text-lg">{(results.taxBreakdown.federal * 100).toFixed(2)}%</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600">State Tax:</span>
-                <span className="font-bold text-orange-600 text-lg">{(results.taxBreakdown.state * 100).toFixed(2)}%</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600">FICA Tax:</span>
-                <span className="font-bold text-purple-600 text-lg">{(results.taxBreakdown.fica * 100).toFixed(2)}%</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600">Gross Annual Salary:</span>
-                <span className="font-semibold text-blue-600">{formatCurrency(results.averageSalary)}</span>
-              </div>
-              <hr className="my-4" />
-              <div className="flex justify-between text-lg font-bold">
-                <span className="text-gray-800">Monthly Take-Home:</span>
-                <span className="text-green-600">
-                  {formatCurrency(results.takeHomeMonthly)}
-                </span>
+            <h2 className="text-2xl font-semibold text-gray-800 mb-4">📊 Monthly Income vs Loan Payment</h2>
+            <div className="flex flex-col items-center">
+              <ResponsiveContainer width="100%" height={250}>
+                <PieChart>
+                  <Pie
+                    data={[
+                      {
+                        name: 'Monthly Take-Home',
+                        value: results.takeHomeMonthly,
+                        fill: '#10b981'
+                      },
+                      {
+                        name: 'Monthly Loan Payment',
+                        value: results.monthlyLoanPayment,
+                        fill: '#ef4444'
+                      }
+                    ]}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={60}
+                    outerRadius={100}
+                    paddingAngle={5}
+                    dataKey="value"
+                  >
+                    <Cell fill="#10b981" />
+                    <Cell fill="#ef4444" />
+                  </Pie>
+                  <Tooltip formatter={(value) => formatCurrency(value as number)} />
+                  <Legend />
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="mt-4 text-center space-y-2">
+                <div className="flex justify-between items-center">
+                  <div className="flex items-center space-x-2 mr-10">
+                    <div className="w-3 h-3 bg-green-500 rounded"></div>
+                    <span className="text-sm text-gray-600">Monthly Income:</span>
+                  </div>
+                  <span className="font-bold text-green-600">{formatCurrency(results.takeHomeMonthly)}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <div className="flex items-center space-x-2">
+                    <div className="w-3 h-3 bg-red-500 rounded"></div>
+                    <span className="text-sm text-gray-600">Monthly Loan Payment:</span>
+                  </div>
+                  <span className="font-bold text-red-600">{formatCurrency(results.monthlyLoanPayment)}</span>
+                </div>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Assumptions */}
+        {/* Financial Outlook Graph */}
+        <div className="bg-white rounded-xl shadow-lg p-6 mt-8">
+          <h2 className="text-2xl font-semibold text-gray-800 mb-4">📈 Financial Outlook</h2>
+          <div className="space-y-8">
+            {/* Debt vs Salary Chart */}
+            <div className="bg-gray-50 rounded-lg p-4">
+              <h3 className="text-lg font-semibold text-gray-700 mb-4 relative z-100">Debt vs Cumulative Salary Over Time</h3>
+              <ResponsiveContainer width="100%" height={400} className="mt-6">
+                <LineChart data={debtVsSalaryData()}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis 
+                    dataKey="year"
+                  />
+                  <YAxis
+                    tickFormatter={(value) => `$${(value / 1000).toFixed(0)}k`}
+                  />
+                  <Tooltip 
+                    formatter={(value) => formatCurrency(value as number)}
+                    labelFormatter={(label) => `Year ${label}`}
+                  />
+                  <Legend />
+                  <Line 
+                    type="monotone" 
+                    dataKey="Total Debt" 
+                    stroke="#ef4444" 
+                    dot={{ fill: '#ef4444' }}
+                    name="Total Debt"
+                  />
+                  <Line 
+                    type="monotone" 
+                    dataKey="Cumulative Salary" 
+                    stroke="#10b981" 
+                    dot={{ fill: '#10b981' }}
+                    name="Cumulative Salary"
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+              <p className="text-sm text-gray-600 mt-2">The green line shows your cumulative earnings, while the red line shows your remaining debt.</p>
+            </div>
+
+            {/* Annual Breakdown Chart */}
+            <div className="bg-gray-50 rounded-lg p-4">
+              <h3 className="text-lg font-semibold text-gray-700 mb-4">College Cost vs Annual Salary</h3>
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={[
+                  {
+                    name: 'College',
+                    'Annual Cost': results.tuitionPerYear,
+                    'Annual Salary': 0
+                  },
+                  {
+                    name: 'Post-Grad',
+                    'Annual Cost': results.monthlyLoanPayment * 12,
+                    'Annual Salary': results.averageSalary
+                  }
+                ]}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="name" />
+                  <YAxis 
+                    tickFormatter={(value) => `$${(value / 1000).toFixed(0)}k`}
+                  />
+                  <Tooltip 
+                    formatter={(value) => formatCurrency(value as number)}
+                  />
+                  <Legend />
+                  <Bar dataKey="Annual Cost" fill="#f97316" />
+                  <Bar dataKey="Annual Salary" fill="#06b6d4" />
+                </BarChart>
+              </ResponsiveContainer>
+              <p className="text-sm text-gray-600 mt-2">Compare your college costs with your post-graduation salary.</p>
+            </div>
+
+            {/* Financial Summary */}
+            <div className="grid md:grid-cols-3 gap-4">
+              <div className="bg-blue-50 rounded-lg p-4 border-l-4 border-blue-500">
+                <p className="text-sm text-gray-600 mb-1">Total Investment</p>
+                <p className="text-2xl font-bold text-blue-600">{formatCurrency(results.tuitionPerYear * 4)}</p>
+                <p className="text-xs text-gray-500 mt-1">4-year college cost</p>
+              </div>
+              <div className="bg-green-50 rounded-lg p-4 border-l-4 border-green-500">
+                <p className="text-sm text-gray-600 mb-1">ROI Breakeven</p>
+                <p className="text-2xl font-bold text-green-600">{results.payoffAge}</p>
+                <p className="text-xs text-gray-500 mt-1">Years old when debt-free</p>
+              </div>
+              <div className="bg-purple-50 rounded-lg p-4 border-l-4 border-purple-500">
+                <p className="text-sm text-gray-600 mb-1">Income Advantage</p>
+                <p className="text-2xl font-bold text-purple-600">{formatCurrency((results.averageSalary - 40000) * (65 - results.payoffAge))}</p>
+                <p className="text-xs text-gray-500 mt-1">Lifetime earning advantage*</p>
+              </div>
+            </div>
+          </div>
+        </div>
         <div className="bg-white rounded-xl shadow-lg p-6 mt-8">
           <h2 className="text-2xl font-semibold text-gray-800 mb-4">📋 Key Assumptions</h2>
           <div className="bg-gray-50 rounded-lg p-4">
