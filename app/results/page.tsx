@@ -247,7 +247,7 @@ export default function ResultsPage() {
             <h2 className="text-2xl font-semibold text-gray-800 mb-4">📊 Monthly Income vs Loan Payment</h2>
             <div className="flex flex-col items-center">
               <ResponsiveContainer width="100%" height={250}>
-                <PieChart>
+                <PieChart margin={{ top: 10, right: 0, bottom: 0, left: 0 }}>
                   <Pie
                     data={[
                       {
@@ -277,7 +277,7 @@ export default function ResultsPage() {
               </ResponsiveContainer>
               <div className="mt-4 text-center space-y-2">
                 <div className="flex justify-between items-center">
-                  <div className="flex items-center space-x-2 mr-10">
+                  <div className="flex items-center space-x-2 mr-16">
                     <div className="w-3 h-3 bg-green-500 rounded"></div>
                     <span className="text-sm text-gray-600">Monthly Income:</span>
                   </div>
