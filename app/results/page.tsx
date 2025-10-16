@@ -4,10 +4,15 @@ import { useRouter } from 'next/navigation';
 import { useApp } from '@/context/AppContext';
 import { useEffect } from 'react';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import { getAllColleges } from '@/data/colleges';
 
 export default function ResultsPage() {
   const router = useRouter();
   const { userInput, results, isLoading } = useApp();
+
+  const allColleges = getAllColleges();
+  const selectedCollege = allColleges.find(c => c.name === userInput?.college);
+  const isCollegePrivate = selectedCollege?.isPrivate || false;
 
   useEffect(() => {
     if (!userInput || !results) {
@@ -167,8 +172,8 @@ export default function ResultsPage() {
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-600">In-State Student:</span>
-                <span className={`font-semibold ${userInput.isPrivateCollege ? 'text-gray-500' : (results.isInState ? 'text-green-600' : 'text-red-600')}`}>
-                  {userInput.isPrivateCollege ? 'N/A' : (results.isInState ? 'Yes' : 'No')}
+                <span className={`font-semibold ${isCollegePrivate ? 'text-gray-500' : (results.isInState ? 'text-green-600' : 'text-red-600')}`}>
+                  {isCollegePrivate ? 'N/A' : (results.isInState ? 'Yes' : 'No')}
                 </span>
               </div>
               <div className="flex justify-between">
