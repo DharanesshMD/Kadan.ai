@@ -3,11 +3,10 @@ export interface UserInput {
   major: string;
   state: string;
   isPrivateCollege: boolean;
+  isInStateStudent: boolean;
   age: number;
   currentSavings: number;
   expectedLoanAmount: number;
-  workDuringCollege: boolean;
-  graduateSchool: boolean;
 }
 
 export interface CalculationResult {
@@ -27,6 +26,16 @@ export interface CalculationResult {
     federal: number;
     state: number;
     fica: number;
+  };
+  idrPlan?: {
+    planName: string;
+    monthlyPayment: number;
+    totalAmountPaid: number;
+    totalInterestPaid: number;
+    payoffYears: number;
+    payoffAge: number;
+    forgivenessPeriod: number;
+    balanceAtForgiveness: number;
   };
   metadata: {
     collegeName: string;

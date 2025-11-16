@@ -36,11 +36,10 @@ export default function InputPage() {
     state: '',
     major: '',
     isPrivateCollege: false,
+    isInStateStudent: false,
     age: 18,
     currentSavings: 0,
-    expectedLoanAmount: 0,
-    workDuringCollege: false,
-    graduateSchool: false
+    expectedLoanAmount: 0
   });
   
   const [collegeSearchInput, setCollegeSearchInput] = useState('');
@@ -140,12 +139,12 @@ export default function InputPage() {
 
       const results = await response.json();
       setResults(results);
+      setIsLoading(false);
       router.push('/results');
     } catch (error) {
       console.error('Calculation error:', error);
-      alert('Failed to calculate. Please try again.');
-    } finally {
       setIsLoading(false);
+      alert('Failed to calculate. Please try again.');
     }
   };
 
@@ -168,7 +167,7 @@ export default function InputPage() {
             {/* State */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Your State *
+                State *
               </label>
               <Select
                 name="state"
@@ -326,33 +325,18 @@ export default function InputPage() {
               />
             </div>
 
-            {/* Work During College */}
-            <div className="flex items-center">
+            {/* In-State Student */}
+            <div className="flex items-center p-3 bg-green-50 rounded-lg border border-green-200">
               <input
                 type="checkbox"
-                id="workDuringCollege"
-                name="workDuringCollege"
-                checked={formData.workDuringCollege}
+                id="isInStateStudent"
+                name="isInStateStudent"
+                checked={formData.isInStateStudent}
                 onChange={handleCheckboxChange}
-                className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                className="h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded"
               />
-              <label htmlFor="workDuringCollege" className="ml-2 block text-sm text-gray-700">
-                I plan to work part-time during college
-              </label>
-            </div>
-
-            {/* Graduate School */}
-            <div className="flex items-center">
-              <input
-                type="checkbox"
-                id="graduateSchool"
-                name="graduateSchool"
-                checked={formData.graduateSchool}
-                onChange={handleCheckboxChange}
-                className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-              />
-              <label htmlFor="graduateSchool" className="ml-2 block text-sm text-gray-700">
-                I plan to attend graduate school
+              <label htmlFor="isInStateStudent" className="ml-2 block text-sm text-gray-700">
+                I am an in-state student (same state as college/university)
               </label>
             </div>
 

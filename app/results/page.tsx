@@ -244,60 +244,108 @@ export default function ResultsPage() {
                 <span className="text-gray-800">Total Repayment:</span>
                 <span className="text-red-600">{formatCurrency(results.totalAmountPaid)}</span>
               </div>
-            </div>
-          </div>
-
-          {/* Monthly Income vs Loan Payment Pie Chart */}
-          <div className="bg-white rounded-xl shadow-lg p-6">
-            <h2 className="text-2xl font-semibold text-gray-800 mb-4">📊 Monthly Income vs Loan Payment</h2>
-            <div className="flex flex-col items-center">
-              <ResponsiveContainer width="100%" height={250}>
-                <PieChart margin={{ top: 10, right: 0, bottom: 0, left: 0 }}>
-                  <Pie
-                    data={[
-                      {
-                        name: 'Monthly Take-Home',
-                        value: results.takeHomeMonthly,
-                        fill: '#10b981'
-                      },
-                      {
-                        name: 'Monthly Loan Payment',
-                        value: results.monthlyLoanPayment,
-                        fill: '#ef4444'
-                      }
-                    ]}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={60}
-                    outerRadius={100}
-                    paddingAngle={5}
-                    dataKey="value"
-                  >
-                    <Cell fill="#10b981" />
-                    <Cell fill="#ef4444" />
-                  </Pie>
-                  <Tooltip formatter={(value) => formatCurrency(value as number)} />
-                  <Legend />
-                </PieChart>
-              </ResponsiveContainer>
-              <div className="mt-4 text-center space-y-2">
-                <div className="flex justify-between items-center">
-                  <div className="flex items-center space-x-2 mr-16">
-                    <div className="w-3 h-3 bg-green-500 rounded"></div>
-                    <span className="text-sm text-gray-600">Monthly Income:</span>
+              
+              {/* Monthly Income vs Loan Payment Pie Chart */}
+              <div className="mt-6 pt-6 border-t">
+                <h3 className="text-lg font-semibold text-gray-800 mb-4">📊 Monthly Income vs Payment</h3>
+                <div className="flex flex-col items-center">
+                  <ResponsiveContainer width="100%" height={200}>
+                    <PieChart margin={{ top: 10, right: 0, bottom: 0, left: 0 }}>
+                      <Pie
+                        data={[
+                          {
+                            name: 'Monthly Take-Home',
+                            value: results.takeHomeMonthly,
+                            fill: '#10b981'
+                          },
+                          {
+                            name: 'Monthly Loan Payment',
+                            value: results.monthlyLoanPayment,
+                            fill: '#ef4444'
+                          }
+                        ]}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={50}
+                        outerRadius={80}
+                        paddingAngle={5}
+                        dataKey="value"
+                      >
+                        <Cell fill="#10b981" />
+                        <Cell fill="#ef4444" />
+                      </Pie>
+                      <Tooltip formatter={(value) => formatCurrency(value as number)} />
+                      <Legend />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div className="mt-3 text-center space-y-2 w-full text-sm">
+                    <div className="flex justify-between items-center">
+                      <div className="flex items-center space-x-2">
+                        <div className="w-2 h-2 bg-green-500 rounded"></div>
+                        <span className="text-gray-600">Income:</span>
+                      </div>
+                      <span className="font-bold text-green-600">{formatCurrency(results.takeHomeMonthly)}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <div className="flex items-center space-x-2">
+                        <div className="w-2 h-2 bg-red-500 rounded"></div>
+                        <span className="text-gray-600">Payment:</span>
+                      </div>
+                      <span className="font-bold text-red-600">{formatCurrency(results.monthlyLoanPayment)}</span>
+                    </div>
                   </div>
-                  <span className="font-bold text-green-600">{formatCurrency(results.takeHomeMonthly)}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <div className="flex items-center space-x-2">
-                    <div className="w-3 h-3 bg-red-500 rounded"></div>
-                    <span className="text-sm text-gray-600">Monthly Loan Payment:</span>
-                  </div>
-                  <span className="font-bold text-red-600">{formatCurrency(results.monthlyLoanPayment)}</span>
                 </div>
               </div>
             </div>
           </div>
+
+          {/* Income-Driven Repayment (IDR) Plan */}
+          {results.idrPlan && (
+            <div className="bg-white rounded-xl shadow-lg p-6">
+              <h2 className="text-2xl font-semibold text-gray-800 mb-4">💳 Income-Driven Repayment (IDR)</h2>
+              <div className="grid md:grid-cols-2 gap-6">
+                <div className="space-y-4">
+                  <div className="bg-blue-50 rounded-lg p-4 border-l-4 border-blue-500">
+                    <p className="text-sm text-gray-600 mb-1">Plan Type</p>
+                    <p className="text-2xl font-bold text-blue-600">{results.idrPlan.planName}</p>
+                  </div>
+                  <div className="bg-purple-50 rounded-lg p-4 border-l-4 border-purple-500">
+                    <p className="text-sm text-gray-600 mb-1">Monthly Payment (IDR)</p>
+                    <p className="text-2xl font-bold text-purple-600">{formatCurrency(results.idrPlan.monthlyPayment)}</p>
+                    <p className="text-xs text-gray-500 mt-1">vs Standard: {formatCurrency(results.monthlyLoanPayment)}</p>
+                  </div>
+                  <div className="bg-green-50 rounded-lg p-4 border-l-4 border-green-500">
+                    <p className="text-sm text-gray-600 mb-1">Payoff Timeline</p>
+                    <p className="text-2xl font-bold text-green-600">{results.idrPlan.payoffYears} years</p>
+                    <p className="text-xs text-gray-500 mt-1">Age {results.idrPlan.payoffAge} when paid off</p>
+                  </div>
+                </div>
+                <div className="space-y-4">
+                  <div className="bg-orange-50 rounded-lg p-4 border-l-4 border-orange-500">
+                    <p className="text-sm text-gray-600 mb-1">Total Amount Paid (IDR)</p>
+                    <p className="text-2xl font-bold text-orange-600">{formatCurrency(results.idrPlan.totalAmountPaid)}</p>
+                    <p className="text-xs text-gray-500 mt-1">vs Standard: {formatCurrency(results.totalAmountPaid)}</p>
+                  </div>
+                  <div className="bg-red-50 rounded-lg p-4 border-l-4 border-red-500">
+                    <p className="text-sm text-gray-600 mb-1">Total Interest (IDR)</p>
+                    <p className="text-2xl font-bold text-red-600">{formatCurrency(results.idrPlan.totalInterestPaid)}</p>
+                    <p className="text-xs text-gray-500 mt-1">vs Standard: {formatCurrency(results.totalInterestPaid)}</p>
+                  </div>
+                  <div className="bg-indigo-50 rounded-lg p-4 border-l-4 border-indigo-500">
+                    <p className="text-sm text-gray-600 mb-1">Loan Forgiveness After</p>
+                    <p className="text-2xl font-bold text-indigo-600">{results.idrPlan.forgivenessPeriod} years</p>
+                    <p className="text-xs text-gray-500 mt-1">Tax implications may apply</p>
+                  </div>
+                </div>
+              </div>
+              <div className="mt-6 p-4 bg-yellow-50 border-l-4 border-yellow-400 rounded">
+                <p className="text-sm text-gray-700">
+                  <strong>ℹ️ Income-Driven Repayment Plans:</strong> IDR plans base your monthly payment on your discretionary income, typically resulting in lower monthly payments but potentially higher total interest. After 20-25 years of qualifying payments, remaining balance is forgiven (may be taxable).
+                </p>
+              </div>
+            </div>
+          )}
+
         </div>
 
         {/* Financial Outlook Graph */}
