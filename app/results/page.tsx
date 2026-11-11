@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useApp } from '@/context/AppContext';
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { getAllColleges } from '@/data/colleges';
 
@@ -19,6 +19,68 @@ export default function ResultsPage() {
       router.push('/input');
     }
   }, [userInput, results, router]);
+
+  // ---- Export the whole results page as a single-page PDF ----
+  const reportRef = useRef<HTMLDivElement>(null);
+  const navRef = useRef<HTMLDivElement>(null);
+  const [exporting, setExporting] = useState(false);
+
+  const handleExportPdf = async () => {
+    const el = reportRef.current;
+    if (!el || exporting) return;
+    setExporting(true);
+    try {
+      // Loaded on demand so these libraries don't bloat the initial bundle
+      const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
+        import('html2canvas-pro'),
+        import('jspdf'),
+      ]);
+
+      // The nav buttons are excluded from the capture, so don't reserve room for them
+      const nav = navRef.current;
+      const navHeight = nav
+        ? nav.offsetHeight + parseFloat(getComputedStyle(nav).marginTop || '0')
+        : 0;
+      const width = el.scrollWidth;
+      const height = Math.max(1, el.scrollHeight - navHeight);
+      // Keep the canvas under browser size limits (~16k px tall) on long pages
+      const scale = Math.min(2, 16000 / height);
+      const canvas = await html2canvas(el, {
+        scale,
+        useCORS: true,
+        backgroundColor: '#eef2ff',
+        width,
+        height,
+        windowWidth: width,
+        scrollX: 0,
+        scrollY: -window.scrollY,
+      });
+
+      // One page sized to the content (CSS px -> PDF pt), capped at the PDF
+      // format maximum of 14400pt per side.
+      const ptScale = Math.min(0.75, 14400 / height, 14400 / width);
+      const pageW = width * ptScale;
+      const pageH = height * ptScale;
+      const pdf = new jsPDF({
+        orientation: pageW > pageH ? 'landscape' : 'portrait',
+        unit: 'pt',
+        format: [pageW, pageH],
+        compress: true,
+      });
+      pdf.addImage(canvas.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, pageW, pageH);
+
+      const slug = (userInput?.college || 'projection')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '');
+      pdf.save(`kadan-financial-projection-${slug}.pdf`);
+    } catch (error) {
+      console.error('PDF export failed:', error);
+      alert('Could not export the PDF. Please try again.');
+    } finally {
+      setExporting(false);
+    }
+  };
 
   if (isLoading) {
     return (
@@ -121,7 +183,7 @@ export default function ResultsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 py-8 px-4">
+    <div ref={reportRef} className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 py-8 px-4">
       <div className="max-w-6xl mx-auto">
         {/* Header */}
         <div className="text-center mb-8">
@@ -478,13 +540,20 @@ export default function ResultsPage() {
           </div>
         </div>
 
-        {/* Navigation */}
-        <div className="flex justify-center space-x-4 mt-8">
+        {/* Navigation (left out of the PDF) */}
+        <div ref={navRef} data-html2canvas-ignore="true" className="flex flex-wrap justify-center gap-4 mt-8">
           <button
             onClick={() => router.push('/input')}
             className="bg-white text-gray-700 font-semibold py-3 px-6 rounded-lg hover:bg-gray-50 transition-colors shadow-lg"
           >
             ← Try Different Scenario
+          </button>
+          <button
+            onClick={handleExportPdf}
+            disabled={exporting}
+            className="bg-white text-blue-700 font-semibold py-3 px-6 rounded-lg hover:bg-blue-50 transition-colors shadow-lg disabled:opacity-60 disabled:cursor-wait"
+          >
+            {exporting ? 'Preparing PDF...' : '⬇ Export as PDF'}
           </button>
           <button
             onClick={() => router.push('/')}
