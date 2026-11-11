@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useApp } from '@/context/AppContext';
-import { UserInput } from '@/types';
+import { UserInput, CalculationResult } from '@/types';
 
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
@@ -19,6 +19,16 @@ const US_STATES = [
   'Virginia', 'Washington', 'West Virginia', 'Wisconsin', 'Wyoming'
 ];
 
+// Rotating messages shown while the AI works (before / alongside live reasoning)
+const THINKING_MESSAGES = [
+  'Looking up tuition and fees...',
+  'Estimating living costs near campus...',
+  'Projecting your starting salary...',
+  'Modeling loan interest and repayment...',
+  'Comparing income-driven repayment plans...',
+  'Building your year-by-year projection...',
+];
+
 const MAJORS = [
   'Computer Science', 'Engineering', 'Business Administration', 'Psychology', 'Biology',
   'English', 'Mathematics', 'Economics', 'Political Science', 'History', 'Chemistry',
@@ -29,7 +39,7 @@ const MAJORS = [
 
 export default function InputPage() {
   const router = useRouter();
-  const { setUserInput, setResults, setIsLoading, isLoading } = useApp();
+  const { setUserInput, setResults, setIsLoading, isLoading, setModelUsed } = useApp();
   
   const [formData, setFormData] = useState<UserInput>({
     college: '',
@@ -43,7 +53,28 @@ export default function InputPage() {
   });
   
   const [collegeSearchInput, setCollegeSearchInput] = useState('');
-  
+
+  // Live "thinking" feedback while calculating
+  const [thinking, setThinking] = useState('');
+  const [messageIndex, setMessageIndex] = useState(0);
+  const thinkingBoxRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isLoading) return;
+    setMessageIndex(0);
+    const id = setInterval(
+      () => setMessageIndex((i) => (i + 1) % THINKING_MESSAGES.length),
+      2500
+    );
+    return () => clearInterval(id);
+  }, [isLoading]);
+
+  useEffect(() => {
+    if (thinkingBoxRef.current) {
+      thinkingBoxRef.current.scrollTop = thinkingBoxRef.current.scrollHeight;
+    }
+  }, [thinking]);
+
   // Get colleges for selected state, filtered by privacy if needed
   const filteredColleges = useMemo(() => {
     if (!formData.state) return [];
@@ -122,6 +153,7 @@ export default function InputPage() {
     }
 
     setIsLoading(true);
+    setThinking('');
     setUserInput(formData);
 
     try {
@@ -133,12 +165,45 @@ export default function InputPage() {
         body: JSON.stringify(formData),
       });
 
-      if (!response.ok) {
+      if (!response.ok || !response.body) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      const results = await response.json();
-      setResults(results);
+      // The server streams newline-delimited JSON events:
+      // { type: 'thinking' | 'status' | 'result' | 'error', ... }
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      const outcome: { result: CalculationResult | null } = { result: null };
+
+      const handleLine = (line: string) => {
+        if (!line.trim()) return;
+        const event = JSON.parse(line);
+        if (event.type === 'thinking') {
+          setThinking((prev) => (prev + event.text).slice(-2000));
+        } else if (event.type === 'result') {
+          outcome.result = event.data;
+          setModelUsed(event.model ?? null);
+        } else if (event.type === 'error') {
+          throw new Error(event.message);
+        }
+      };
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        lines.forEach(handleLine);
+      }
+      handleLine(buffer);
+
+      if (!outcome.result) {
+        throw new Error('No result received');
+      }
+
+      setResults(outcome.result);
       setIsLoading(false);
       router.push('/results');
     } catch (error) {
@@ -153,9 +218,25 @@ export default function InputPage() {
       <div className="max-w-2xl mx-auto">
         <div className="bg-white rounded-2xl shadow-xl p-8 relative">
           {isLoading && (
-            <div className="absolute inset-0 bg-white bg-opacity-75 flex items-center justify-center rounded-2xl z-10">
-              <div className="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-blue-500"></div>
-              <p className="ml-4 text-blue-700 text-lg font-semibold">Calculating your future...</p>
+            <div className="absolute inset-0 bg-white bg-opacity-90 flex flex-col items-center justify-center rounded-2xl z-10 p-6">
+              <div className="flex items-center">
+                <div className="animate-spin rounded-full h-12 w-12 border-t-4 border-b-4 border-blue-500"></div>
+                <p className="ml-4 text-blue-700 text-lg font-semibold">Calculating your future...</p>
+              </div>
+              <p className="mt-4 text-sm text-gray-600 animate-pulse" aria-live="polite">
+                {THINKING_MESSAGES[messageIndex]}
+              </p>
+              {thinking && (
+                <div className="mt-4 w-full max-w-lg">
+                  <p className="text-xs uppercase tracking-wide text-gray-400 mb-1">AI is thinking</p>
+                  <div
+                    ref={thinkingBoxRef}
+                    className="max-h-40 overflow-y-auto rounded-lg bg-gray-50 border border-gray-200 p-3 text-xs text-gray-500 italic whitespace-pre-wrap"
+                  >
+                    {thinking}
+                  </div>
+                </div>
+              )}
             </div>
           )}
           <div className="text-center mb-8">

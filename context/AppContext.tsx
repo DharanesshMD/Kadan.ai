@@ -10,6 +10,8 @@ interface AppContextType {
   setResults: (results: CalculationResult) => void;
   isLoading: boolean;
   setIsLoading: (loading: boolean) => void;
+  modelUsed: string | null;
+  setModelUsed: (model: string | null) => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -18,6 +20,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [userInput, setUserInput] = useState<UserInput | null>(null);
   const [results, setResults] = useState<CalculationResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [modelUsed, setModelUsed] = useState<string | null>(null);
 
   return (
     <AppContext.Provider value={{
@@ -27,6 +30,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setResults,
       isLoading,
       setIsLoading,
+      modelUsed,
+      setModelUsed,
     }}>
       {children}
     </AppContext.Provider>

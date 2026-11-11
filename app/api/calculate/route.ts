@@ -1,14 +1,39 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { UserInput, CalculationResult } from '@/types';
 import { getMasterPrompt } from '@/lib/prompts';
 
-const NVIDIA_API_URL = "https://integrate.api.nvidia.com/v1/chat/completions";
+export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
+
+const NVIDIA_API_URL = process.env.NVIDIA_API_URL || "https://integrate.api.nvidia.com/v1/chat/completions";
 const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY!;
 
+interface ModelConfig {
+  name: string;
+  maxTokens: number;
+  temperature: number;
+  topP: number;
+  // Extra body fields for this model (e.g. enabling reasoning)
+  extraBody?: Record<string, unknown>;
+  // Whether this model's reasoning tokens are streamed to the UI
+  showThinking?: boolean;
+}
+
 // Models raced in parallel; the first one to return valid JSON wins.
-const MODELS = [
-  { name: "minimaxai/minimax-m3.1-flash", maxTokens: 8192, topP: 0.95 },
-  { name: "google/gemma-4-31b-it", maxTokens: 4096, topP: 1 },
+const MODELS: ModelConfig[] = [
+  { name: "minimaxai/minimax-m3.1-flash", maxTokens: 8192, temperature: 0.2, topP: 0.95 },
+  { name: "google/gemma-4-31b-it", maxTokens: 4096, temperature: 0.2, topP: 1 },
+  {
+    name: "nvidia/nemotron-3.5-lightning-30b-a3b",
+    maxTokens: 8192,
+    temperature: 0.6,
+    topP: 0.95,
+    extraBody: {
+      chat_template_kwargs: { enable_thinking: true },
+      reasoning_budget: 4096,
+    },
+    showThinking: true,
+  },
 ];
 
 const parseResult = (raw: string): CalculationResult => {
@@ -32,17 +57,19 @@ const parseResult = (raw: string): CalculationResult => {
   return JSON.parse(jsonContent);
 };
 
+// Streams one model's completion; reports reasoning tokens via onThinking.
 const callModel = async (
-  model: (typeof MODELS)[number],
+  model: ModelConfig,
   prompt: string,
-  signal: AbortSignal
+  signal: AbortSignal,
+  onThinking: (text: string) => void
 ): Promise<CalculationResult> => {
   const response = await fetch(NVIDIA_API_URL, {
     method: 'POST',
     signal,
     headers: {
       "Authorization": `Bearer ${NVIDIA_API_KEY}`,
-      "Accept": "application/json",
+      "Accept": "text/event-stream",
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
@@ -50,58 +77,112 @@ const callModel = async (
       messages: [{ role: "user", content: prompt }],
       max_tokens: model.maxTokens,
       seed: 0,
-      temperature: 0.2,
+      temperature: model.temperature,
       top_p: model.topP,
-      stream: false,
+      stream: true,
+      ...model.extraBody,
     }),
   });
 
-  if (!response.ok) {
-    const errorText = await response.text();
+  if (!response.ok || !response.body) {
+    const errorText = await response.text().catch(() => '');
     throw new Error(`${model.name} ${response.status}: ${errorText}`);
   }
 
-  const data = await response.json();
-  return parseResult(data.choices[0].message.content);
-};
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let content = '';
 
-const calculate = async (input: UserInput): Promise<CalculationResult> => {
-  const prompt = getMasterPrompt(input, new Date().getFullYear());
-  const controllers = MODELS.map(() => new AbortController());
+  const handleLine = (line: string) => {
+    if (!line.startsWith('data:')) return;
+    const data = line.slice(5).trim();
+    if (!data || data === '[DONE]') return;
+    let delta;
+    try {
+      delta = JSON.parse(data).choices?.[0]?.delta;
+    } catch {
+      return; // partial/invalid chunk
+    }
+    if (!delta) return;
+    const reasoning = delta.reasoning_content ?? delta.reasoning;
+    if (reasoning && model.showThinking) onThinking(reasoning);
+    if (delta.content) content += delta.content;
+  };
 
-  try {
-    // Promise.any resolves with the first successful (valid JSON) result
-    const { result, winner } = await Promise.any(
-      MODELS.map((model, i) =>
-        callModel(model, prompt, controllers[i].signal).then((result) => ({
-          result,
-          winner: i,
-        }))
-      )
-    );
-    console.log("Fastest model:", MODELS[winner].name);
-
-    // Cancel the slower request(s) immediately
-    controllers.forEach((c, i) => {
-      if (i !== winner) c.abort();
-    });
-
-    return result;
-  } catch (error) {
-    controllers.forEach((c) => c.abort());
-    const errors = error instanceof AggregateError ? error.errors : [error];
-    errors.forEach((e) => console.error("Model failed:", (e as Error).message));
-    throw new Error("Failed to calculate. Please try again.");
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+    lines.forEach(handleLine);
   }
+  if (buffer) handleLine(buffer);
+
+  return parseResult(content);
 };
 
 export async function POST(req: NextRequest) {
-  try {
-    const userInput = await req.json();
-    const results = await calculate(userInput);
-    return NextResponse.json(results);
-  } catch (error) {
-    console.error('API route calculation error:', error);
-    return NextResponse.json({ error: 'Failed to calculate' }, { status: 500 });
-  }
+  const userInput: UserInput = await req.json();
+  const prompt = getMasterPrompt(userInput, new Date().getFullYear());
+  const controllers = MODELS.map(() => new AbortController());
+  const abortAll = (except = -1) =>
+    controllers.forEach((c, i) => i !== except && c.abort());
+
+  // Stop all upstream requests if the client disconnects
+  req.signal.addEventListener('abort', () => abortAll());
+
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      let closed = false;
+      const send = (event: object) => {
+        if (closed) return;
+        try {
+          controller.enqueue(encoder.encode(JSON.stringify(event) + '\n'));
+        } catch {
+          closed = true; // client went away
+        }
+      };
+      const close = () => {
+        if (closed) return;
+        closed = true;
+        controller.close();
+      };
+
+      send({ type: 'status', message: 'Analyzing your college and finances...' });
+
+      try {
+        // Promise.any resolves with the first successful (valid JSON) result
+        const { result, winner } = await Promise.any(
+          MODELS.map((model, i) =>
+            callModel(model, prompt, controllers[i].signal, (text) =>
+              send({ type: 'thinking', text })
+            ).then((result) => ({ result, winner: i }))
+          )
+        );
+        console.log("Fastest model:", MODELS[winner].name);
+
+        // Cancel the slower request(s) immediately
+        abortAll(winner);
+
+        send({ type: 'result', data: result, model: MODELS[winner].name });
+      } catch (error) {
+        abortAll();
+        const errors = error instanceof AggregateError ? error.errors : [error];
+        errors.forEach((e) => console.error("Model failed:", (e as Error).message));
+        send({ type: 'error', message: 'Failed to calculate. Please try again.' });
+      } finally {
+        close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'application/x-ndjson; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+    },
+  });
 }

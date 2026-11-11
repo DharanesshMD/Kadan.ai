@@ -8,7 +8,7 @@ import { getAllColleges } from '@/data/colleges';
 
 export default function ResultsPage() {
   const router = useRouter();
-  const { userInput, results, isLoading } = useApp();
+  const { userInput, results, isLoading, modelUsed } = useApp();
 
   const allColleges = getAllColleges();
   const selectedCollege = allColleges.find(c => c.name === userInput?.college);
@@ -127,6 +127,11 @@ export default function ResultsPage() {
         <div className="text-center mb-8">
           <h1 className="text-4xl font-bold text-gray-800 mb-2">Your Financial Projection</h1>
           <p className="text-gray-600">Based on {userInput.college} • {userInput.major} • {userInput.state}</p>
+          {modelUsed && (
+            <span className="inline-block mt-2 px-3 py-1 text-xs font-mono text-gray-500 bg-white/70 border border-gray-200 rounded-full">
+              {modelUsed}
+            </span>
+          )}
         </div>
 
         {/* Key Metrics Cards */}
