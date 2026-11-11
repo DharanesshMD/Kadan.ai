@@ -17,12 +17,15 @@ interface ModelConfig {
   extraBody?: Record<string, unknown>;
   // Whether this model's reasoning tokens are streamed to the UI
   showThinking?: boolean;
+  // Hedge: only start this model if nobody has won after this many ms.
+  // Saves rate-limit quota (each started model costs 1 request).
+  startDelayMs?: number;
 }
 
-// Models raced in parallel; the first one to return valid JSON wins.
+// Models raced; the first one to return valid JSON wins.
 const MODELS: ModelConfig[] = [
   { name: "minimaxai/minimax-m3.1-flash", maxTokens: 8192, temperature: 0.2, topP: 0.95 },
-  { name: "google/gemma-4-31b-it", maxTokens: 4096, temperature: 0.2, topP: 1 },
+  { name: "google/gemma-4-31b-it", maxTokens: 4096, temperature: 0.2, topP: 1, startDelayMs: 5000 },
   {
     name: "nvidia/nemotron-3.5-lightning-30b-a3b",
     maxTokens: 8192,
@@ -35,6 +38,57 @@ const MODELS: ModelConfig[] = [
     showThinking: true,
   },
 ];
+
+// ---- Rate limiting & retries -------------------------------------------
+// NVIDIA's API allows ~40 requests/minute per key. We keep a sliding-window
+// limiter below that (headroom for other instances) and retry transient errors.
+// NOTE: state is per server instance; a shared store (e.g. Redis/KV) would be
+// needed for a strict global limit across serverless instances.
+const RPM_LIMIT = Number(process.env.NVIDIA_RPM_LIMIT) || 35;
+const MAX_ATTEMPTS = 3;
+const DEADLINE_MS = 55_000; // stay under maxDuration
+const requestLog: number[] = [];
+
+class HttpError extends Error {
+  constructor(public status: number, message: string, public retryAfterMs?: number) {
+    super(message);
+  }
+}
+
+const abortError = () => new DOMException('Aborted', 'AbortError');
+
+const sleep = (ms: number, signal: AbortSignal) =>
+  new Promise<void>((resolve, reject) => {
+    if (signal.aborted) return reject(abortError());
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(abortError());
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+
+// Wait until a request slot is free in the sliding 60s window.
+const acquireSlot = async (signal: AbortSignal) => {
+  while (true) {
+    const now = Date.now();
+    while (requestLog.length && now - requestLog[0] >= 60_000) requestLog.shift();
+    if (requestLog.length < RPM_LIMIT) {
+      requestLog.push(now);
+      return;
+    }
+    await sleep(60_000 - (now - requestLog[0]) + 50, signal);
+  }
+};
+
+const isRetryable = (e: unknown) => {
+  if (e instanceof HttpError) return [408, 429, 500, 502, 503, 504].includes(e.status);
+  if (e instanceof SyntaxError) return true; // model returned malformed JSON
+  return e instanceof TypeError; // network failure (fetch failed)
+};
 
 const parseResult = (raw: string): CalculationResult => {
   // Strip any <think>...</think> reasoning block
@@ -86,7 +140,12 @@ const callModel = async (
 
   if (!response.ok || !response.body) {
     const errorText = await response.text().catch(() => '');
-    throw new Error(`${model.name} ${response.status}: ${errorText}`);
+    const retryAfter = Number(response.headers.get('retry-after'));
+    throw new HttpError(
+      response.status,
+      `${model.name} ${response.status}: ${errorText}`,
+      retryAfter > 0 ? retryAfter * 1000 : undefined
+    );
   }
 
   const reader = response.body.getReader();
@@ -123,6 +182,33 @@ const callModel = async (
   return parseResult(content);
 };
 
+// Runs one model with rate limiting + retry/backoff on transient failures.
+const callModelWithRetry = async (
+  model: ModelConfig,
+  prompt: string,
+  signal: AbortSignal,
+  onThinking: (text: string) => void,
+  onRetry: (message: string) => void
+): Promise<CalculationResult> => {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await acquireSlot(signal);
+      return await callModel(model, prompt, signal, onThinking);
+    } catch (e) {
+      if (signal.aborted || attempt >= MAX_ATTEMPTS || !isRetryable(e)) throw e;
+      // Honor Retry-After, else exponential backoff (1s, 2s, 4s...) + jitter
+      const backoff = Math.min(1000 * 2 ** (attempt - 1), 8000) + Math.random() * 500;
+      const delay = e instanceof HttpError && e.retryAfterMs ? e.retryAfterMs : backoff;
+      const rateLimited = e instanceof HttpError && e.status === 429;
+      console.warn(`${model.name} attempt ${attempt} failed (${(e as Error).message.slice(0, 120)}); retrying in ${Math.round(delay)}ms`);
+      if (model.showThinking) {
+        onRetry(rateLimited ? 'High demand, retrying shortly...' : 'Retrying...');
+      }
+      await sleep(delay, signal);
+    }
+  }
+};
+
 export async function POST(req: NextRequest) {
   const userInput: UserInput = await req.json();
   const prompt = getMasterPrompt(userInput, new Date().getFullYear());
@@ -153,14 +239,25 @@ export async function POST(req: NextRequest) {
 
       send({ type: 'status', message: 'Analyzing your college and finances...' });
 
+      // Hard deadline so we fail cleanly before the platform kills the function
+      const deadline = setTimeout(() => abortAll(), DEADLINE_MS);
+
       try {
         // Promise.any resolves with the first successful (valid JSON) result
         const { result, winner } = await Promise.any(
-          MODELS.map((model, i) =>
-            callModel(model, prompt, controllers[i].signal, (text) =>
-              send({ type: 'thinking', text })
-            ).then((result) => ({ result, winner: i }))
-          )
+          MODELS.map(async (model, i) => {
+            const signal = controllers[i].signal;
+            // Hedged models start late (and never start if someone already won)
+            if (model.startDelayMs) await sleep(model.startDelayMs, signal);
+            const result = await callModelWithRetry(
+              model,
+              prompt,
+              signal,
+              (text) => send({ type: 'thinking', text }),
+              (message) => send({ type: 'retry', message })
+            );
+            return { result, winner: i };
+          })
         );
         console.log("Fastest model:", MODELS[winner].name);
 
@@ -174,6 +271,7 @@ export async function POST(req: NextRequest) {
         errors.forEach((e) => console.error("Model failed:", (e as Error).message));
         send({ type: 'error', message: 'Failed to calculate. Please try again.' });
       } finally {
+        clearTimeout(deadline);
         close();
       }
     },

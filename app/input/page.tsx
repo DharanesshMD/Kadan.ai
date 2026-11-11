@@ -56,6 +56,7 @@ export default function InputPage() {
 
   // Live "thinking" feedback while calculating
   const [thinking, setThinking] = useState('');
+  const [retryMessage, setRetryMessage] = useState('');
   const [messageIndex, setMessageIndex] = useState(0);
   const thinkingBoxRef = useRef<HTMLDivElement>(null);
 
@@ -154,6 +155,7 @@ export default function InputPage() {
 
     setIsLoading(true);
     setThinking('');
+    setRetryMessage('');
     setUserInput(formData);
 
     try {
@@ -180,7 +182,12 @@ export default function InputPage() {
         if (!line.trim()) return;
         const event = JSON.parse(line);
         if (event.type === 'thinking') {
+          setRetryMessage('');
           setThinking((prev) => (prev + event.text).slice(-2000));
+        } else if (event.type === 'retry') {
+          // A model attempt failed (e.g. rate limit); restart its reasoning feed
+          setThinking('');
+          setRetryMessage(event.message);
         } else if (event.type === 'result') {
           outcome.result = event.data;
           setModelUsed(event.model ?? null);
@@ -224,7 +231,7 @@ export default function InputPage() {
                 <p className="ml-4 text-blue-700 text-lg font-semibold">Calculating your future...</p>
               </div>
               <p className="mt-4 text-sm text-gray-600 animate-pulse" aria-live="polite">
-                {THINKING_MESSAGES[messageIndex]}
+                {retryMessage || THINKING_MESSAGES[messageIndex]}
               </p>
               {thinking && (
                 <div className="mt-4 w-full max-w-lg">
