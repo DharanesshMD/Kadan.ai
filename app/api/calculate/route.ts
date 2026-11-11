@@ -16,16 +16,17 @@ const calculateWithGemini = async (input: UserInput): Promise<CalculationResult>
   };
 
   const payload = {
-    "model": "google/gemma-3-27b-it",
+    "model": "minimaxai/minimax-m3.1-flash",
     "messages": [
       {
         "role": "user",
         "content": prompt
       }
     ],
-    "max_tokens": 2048,
+    "max_tokens": 16384,
+    "seed": 0,
     "temperature": 0.20,
-    "top_p": 0.70,
+    "top_p": 0.95,
     "stream": false
   };
 
@@ -53,9 +54,12 @@ const calculateWithGemini = async (input: UserInput): Promise<CalculationResult>
     console.log("NVIDIA API Response:", JSON.stringify(data, null, 2));
     
     // Extract the content from NVIDIA API response
-    const content = data.choices[0].message.content;
+    // Strip any <think>...</think> reasoning block the model may emit
+    const content: string = data.choices[0].message.content
+      .replace(/<think>[\s\S]*?<\/think>/g, '')
+      .trim();
     console.log("Extracted content:", content);
-    
+
     // Remove markdown code blocks if present and extract JSON
     let jsonContent = content;
     if (content.includes('```json')) {
