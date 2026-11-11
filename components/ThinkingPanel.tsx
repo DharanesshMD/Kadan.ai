@@ -19,9 +19,19 @@ export default function ThinkingPanel({ thinking, retryMessage }: ThinkingPanelP
     return () => clearInterval(id);
   }, []);
 
-  // Keep the newest reasoning in view as it streams in
+  // Follow the stream only while the user is at the bottom; if they scroll up
+  // to re-read, leave their position alone until they scroll back down.
+  const stickToBottom = useRef(true);
+
+  const handleScroll = () => {
+    const el = feedRef.current;
+    if (!el) return;
+    stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+  };
+
   useEffect(() => {
-    if (feedRef.current) feedRef.current.scrollTop = feedRef.current.scrollHeight;
+    const el = feedRef.current;
+    if (el && stickToBottom.current) el.scrollTop = el.scrollHeight;
   }, [thinking]);
 
   const text = thinking.trim();
@@ -57,6 +67,11 @@ export default function ThinkingPanel({ thinking, retryMessage }: ThinkingPanelP
           </p>
           <div
             ref={feedRef}
+            onScroll={handleScroll}
+            onWheel={(e) => {
+              // Scrolling up = the user wants to read; stop following immediately
+              if (e.deltaY < 0) stickToBottom.current = false;
+            }}
             aria-live="off"
             className="h-56 overflow-y-auto text-sm leading-relaxed text-gray-700 whitespace-pre-wrap break-words"
           >

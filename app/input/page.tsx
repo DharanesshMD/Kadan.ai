@@ -156,7 +156,7 @@ export default function InputPage() {
         const event = JSON.parse(line);
         if (event.type === 'thinking') {
           setRetryMessage('');
-          setThinking((prev) => (prev + event.text).slice(-2000));
+          setThinking((prev) => (prev + event.text).slice(-30000));
         } else if (event.type === 'retry') {
           // A model attempt failed (e.g. rate limit); restart its reasoning feed
           setThinking('');
