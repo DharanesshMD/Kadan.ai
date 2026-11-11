@@ -3,7 +3,7 @@ import { UserInput, CalculationResult } from '@/types';
 import { getMasterPrompt } from '@/lib/prompts';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 const NVIDIA_API_URL = process.env.NVIDIA_API_URL || "https://integrate.api.nvidia.com/v1/chat/completions";
 const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY!;
@@ -23,15 +23,14 @@ interface ModelConfig {
 // Models raced; the first one to return valid JSON wins.
 const MODELS: ModelConfig[] = [
   { name: "minimaxai/minimax-m3.1-flash", maxTokens: 8192, temperature: 0.2, topP: 0.95 },
-  { name: "google/gemma-4-31b-it", maxTokens: 4096, temperature: 0.2, topP: 1, startDelayMs: 5000 },
   {
     name: "nvidia/nemotron-3.5-lightning-30b-a3b",
-    maxTokens: 8192,
+    maxTokens: 4096,
     temperature: 0.6,
     topP: 0.95,
     extraBody: {
       chat_template_kwargs: { enable_thinking: true },
-      reasoning_budget: 4096,
+      reasoning_budget: 1024,
     },
   },
 ];
@@ -43,7 +42,7 @@ const MODELS: ModelConfig[] = [
 // needed for a strict global limit across serverless instances.
 const RPM_LIMIT = Number(process.env.NVIDIA_RPM_LIMIT) || 35;
 const MAX_ATTEMPTS = 3;
-const DEADLINE_MS = 55_000; // stay under maxDuration
+const DEADLINE_MS = 110_000; // stay under maxDuration
 const requestLog: number[] = [];
 
 class HttpError extends Error {
