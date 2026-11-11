@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import ReactMarkdown, { Components } from 'react-markdown';
 
 interface ThinkingPanelProps {
   /** Live reasoning text streamed from the model (may be empty at first). */
@@ -8,6 +9,39 @@ interface ThinkingPanelProps {
   /** Notice such as "High demand, retrying shortly..." (may be empty). */
   retryMessage: string;
 }
+
+// Tailwind styling for the markdown elements (no typography plugin needed).
+const markdownComponents: Components = {
+  p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+  strong: ({ children }) => <strong className="font-semibold text-gray-900">{children}</strong>,
+  em: ({ children }) => <em className="italic">{children}</em>,
+  h1: ({ children }) => <h3 className="mt-3 mb-1 text-base font-bold text-gray-900">{children}</h3>,
+  h2: ({ children }) => <h3 className="mt-3 mb-1 text-base font-bold text-gray-900">{children}</h3>,
+  h3: ({ children }) => <h4 className="mt-2 mb-1 text-sm font-semibold text-gray-900">{children}</h4>,
+  h4: ({ children }) => <h4 className="mt-2 mb-1 text-sm font-semibold text-gray-900">{children}</h4>,
+  ul: ({ children }) => <ul className="mb-2 ml-5 list-disc space-y-0.5">{children}</ul>,
+  ol: ({ children }) => <ol className="mb-2 ml-5 list-decimal space-y-0.5">{children}</ol>,
+  li: ({ children }) => <li>{children}</li>,
+  blockquote: ({ children }) => (
+    <blockquote className="mb-2 border-l-2 border-blue-300 pl-3 text-gray-500">{children}</blockquote>
+  ),
+  code: ({ children, className }) =>
+    className ? (
+      // fenced block (has a language-* class)
+      <code className="font-mono text-xs">{children}</code>
+    ) : (
+      <code className="rounded bg-white/70 px-1 py-0.5 font-mono text-[0.8em] text-blue-800">{children}</code>
+    ),
+  pre: ({ children }) => (
+    <pre className="mb-2 overflow-x-auto rounded-lg bg-white/70 p-2 text-gray-700">{children}</pre>
+  ),
+  hr: () => <hr className="my-3 border-blue-100" />,
+  a: ({ children, href }) => (
+    <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">
+      {children}
+    </a>
+  ),
+};
 
 export default function ThinkingPanel({ thinking, retryMessage }: ThinkingPanelProps) {
   const [elapsed, setElapsed] = useState(0);
@@ -19,22 +53,39 @@ export default function ThinkingPanel({ thinking, retryMessage }: ThinkingPanelP
     return () => clearInterval(id);
   }, []);
 
-  // Follow the stream only while the user is at the bottom; if they scroll up
-  // to re-read, leave their position alone until they scroll back down.
+  // Auto-follow the stream, but yield to the user. Direction-based so tiny
+  // trackpad scrolls count: new content only ever *increases* scrollTop, so
+  // any decrease means the user scrolled up -> stop following. Following
+  // resumes only once the user reaches the very bottom again.
   const stickToBottom = useRef(true);
+  const lastScrollTop = useRef(0);
 
   const handleScroll = () => {
     const el = feedRef.current;
     if (!el) return;
-    stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (el.scrollTop < lastScrollTop.current - 1) {
+      stickToBottom.current = false;
+    } else if (distanceFromBottom < 4) {
+      stickToBottom.current = true;
+    }
+    lastScrollTop.current = el.scrollTop;
   };
 
   useEffect(() => {
     const el = feedRef.current;
-    if (el && stickToBottom.current) el.scrollTop = el.scrollHeight;
+    if (el && stickToBottom.current) {
+      el.scrollTop = el.scrollHeight;
+      lastScrollTop.current = el.scrollTop;
+    }
   }, [thinking]);
 
-  const text = thinking.trim();
+  // Models put reasoning on single newlines; markdown would collapse those
+  // into spaces, so turn them into hard line breaks.
+  const markdown = useMemo(
+    () => thinking.trim().replace(/([^\n])\n(?=[^\n])/g, '$1  \n'),
+    [thinking]
+  );
 
   return (
     <div
@@ -70,16 +121,13 @@ export default function ThinkingPanel({ thinking, retryMessage }: ThinkingPanelP
             onScroll={handleScroll}
             onWheel={(e) => {
               // Scrolling up = the user wants to read; stop following immediately
-              if (e.deltaY < 0) stickToBottom.current = false;
+              if (e.deltaY < 0 && e.currentTarget.scrollTop > 0) stickToBottom.current = false;
             }}
             aria-live="off"
-            className="h-56 overflow-y-auto text-sm leading-relaxed text-gray-700 whitespace-pre-wrap break-words"
+            className="h-56 overflow-y-auto break-words text-sm leading-relaxed text-gray-700"
           >
-            {text ? (
-              <>
-                {text}
-                <span className="ml-0.5 inline-block h-4 w-px translate-y-0.5 bg-blue-500 animate-pulse" />
-              </>
+            {markdown ? (
+              <ReactMarkdown components={markdownComponents}>{markdown}</ReactMarkdown>
             ) : (
               <span className="text-gray-400 animate-pulse">Waiting for the AI to start thinking...</span>
             )}
