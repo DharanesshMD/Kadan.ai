@@ -15,8 +15,6 @@ interface ModelConfig {
   topP: number;
   // Extra body fields for this model (e.g. enabling reasoning)
   extraBody?: Record<string, unknown>;
-  // Whether this model's reasoning tokens are streamed to the UI
-  showThinking?: boolean;
   // Hedge: only start this model if nobody has won after this many ms.
   // Saves rate-limit quota (each started model costs 1 request).
   startDelayMs?: number;
@@ -35,7 +33,6 @@ const MODELS: ModelConfig[] = [
       chat_template_kwargs: { enable_thinking: true },
       reasoning_budget: 4096,
     },
-    showThinking: true,
   },
 ];
 
@@ -152,6 +149,7 @@ const callModel = async (
   const decoder = new TextDecoder();
   let buffer = '';
   let content = '';
+  let thinkSent = 0; // chars of inline <think> text already reported
 
   const handleLine = (line: string) => {
     if (!line.startsWith('data:')) return;
@@ -165,8 +163,19 @@ const callModel = async (
     }
     if (!delta) return;
     const reasoning = delta.reasoning_content ?? delta.reasoning;
-    if (reasoning && model.showThinking) onThinking(reasoning);
-    if (delta.content) content += delta.content;
+    if (reasoning) onThinking(reasoning);
+    if (delta.content) {
+      content += delta.content;
+      // Some models put reasoning inline as <think>...</think> in the content
+      const m = content.match(/<think>([\s\S]*?)(<\/think>|$)/);
+      if (m) {
+        const text = m[2] ? m[1] : m[1].replace(/<[^>]*$/, ''); // drop partial tag
+        if (text.length > thinkSent) {
+          onThinking(text.slice(thinkSent));
+          thinkSent = text.length;
+        }
+      }
+    }
   };
 
   while (true) {
@@ -201,9 +210,7 @@ const callModelWithRetry = async (
       const delay = e instanceof HttpError && e.retryAfterMs ? e.retryAfterMs : backoff;
       const rateLimited = e instanceof HttpError && e.status === 429;
       console.warn(`${model.name} attempt ${attempt} failed (${(e as Error).message.slice(0, 120)}); retrying in ${Math.round(delay)}ms`);
-      if (model.showThinking) {
-        onRetry(rateLimited ? 'High demand, retrying shortly...' : 'Retrying...');
-      }
+      onRetry(rateLimited ? 'High demand, retrying shortly...' : 'Retrying...');
       await sleep(delay, signal);
     }
   }
@@ -239,6 +246,8 @@ export async function POST(req: NextRequest) {
 
       send({ type: 'status', message: 'Analyzing your college and finances...' });
 
+      let feedOwner = -1; // index of the model currently streaming reasoning to the UI
+
       // Hard deadline so we fail cleanly before the platform kills the function
       const deadline = setTimeout(() => abortAll(), DEADLINE_MS);
 
@@ -249,14 +258,31 @@ export async function POST(req: NextRequest) {
             const signal = controllers[i].signal;
             // Hedged models start late (and never start if someone already won)
             if (model.startDelayMs) await sleep(model.startDelayMs, signal);
-            const result = await callModelWithRetry(
-              model,
-              prompt,
-              signal,
-              (text) => send({ type: 'thinking', text }),
-              (message) => send({ type: 'retry', message })
-            );
-            return { result, winner: i };
+            try {
+              const result = await callModelWithRetry(
+                model,
+                prompt,
+                signal,
+                // Only one model feeds the UI at a time (first to start reasoning),
+                // so streams from different models never interleave.
+                (text) => {
+                  if (feedOwner === -1) feedOwner = i;
+                  if (feedOwner === i) send({ type: 'thinking', text });
+                },
+                (message) => {
+                  // The owner's retry restarts its reasoning from scratch
+                  if (feedOwner === i) send({ type: 'retry', message });
+                }
+              );
+              return { result, winner: i };
+            } catch (e) {
+              // Owner died: free the feed so another model can take over
+              if (feedOwner === i) {
+                feedOwner = -1;
+                send({ type: 'retry', message: '' });
+              }
+              throw e;
+            }
           })
         );
         console.log("Fastest model:", MODELS[winner].name);
